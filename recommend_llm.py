@@ -17,11 +17,14 @@ from langchain_community.document_loaders import CSVLoader
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 
 def item():
+    a_df = pd.read_csv('archive/anime.csv', usecols=['Aired'])
+
     anime = pd.read_csv('archive/anime_with_synopsis.csv')
     # print(anime.head())
+    anime['Aired'] = a_df['Aired']
     anime = anime.dropna()
 
-    anime['combined_info'] = anime.apply(lambda row: f"Title: {row['Name']}. Overview: {row['sypnopsis']} Genres: {row['Genres']}", axis=1)
+    anime['combined_info'] = anime.apply(lambda row: f"Title: {row['Name']}. Overview: {row['sypnopsis']} Genres: {row['Genres']} Aired: {row['Aired']}", axis=1)
     # print(anime['combined_info'][0])
 
     anime[['combined_info']].to_csv('archive/anime_updated.csv', index=False)
@@ -56,38 +59,42 @@ def item():
 
 def user(docsearch):
     template_prefix = """    You are a movie recommender system that help users to find anime that match their preferences. 
-    Use the following pieces of context to answer the question at the end. 
-    For each question, take into account the context and the personal information provided by the user.
+    Use the following pieces of database to answer the question at the end. 
+    For each question, take into account the database and the personal information provided by the user.
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
-
-    {context}"""
+    {context}
+    """
 
     user_info = """    This is what we know about the user, and you can use this information to better tune your research:
     Age: {age}
-    Gender: {gender}"""
+    Gender: {gender}
+    Genre: {genre}
+    Aired: {aired}
+    """
 
     template_suffix= """    Question: {question}
-    Your response:"""
+    Your response:
+    """
 
-    user_info = user_info.format(age = 18, gender = 'female')
+    user_info = user_info.format(age = 29, gender = 'male', genre = 'Shounen', aired = 'latest')
 
     COMBINED_PROMPT = template_prefix +'\n'+ user_info +'\n'+ template_suffix
-    # print(COMBINED_PROMPT)
+    print(COMBINED_PROMPT)
 
     PROMPT = PromptTemplate(
         template=COMBINED_PROMPT, input_variables=["context", "question"])
 
-    chain_type_kwargs = {"prompt": PROMPT}
     llm = Ollama(model="llama3:70b")
 
     qa = RetrievalQA.from_chain_type(llm=llm, 
         chain_type="stuff", 
         retriever=docsearch.as_retriever(),
         return_source_documents=True, 
-        chain_type_kwargs=chain_type_kwargs)
+        chain_type_kwargs={"prompt": PROMPT})
 
-    query = "I'm looking for an action anime with animals, any suggestions?"
+    query = "Can you recommend some animes that suit my taste?"
     result = qa({'query':query})
+
     print(result['result'])
     print("*"*200)
     print(result['source_documents'])
