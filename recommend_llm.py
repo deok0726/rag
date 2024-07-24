@@ -28,7 +28,7 @@ def item():
     # print(anime['combined_info'][0])
 
     anime[['combined_info']].to_csv('archive/anime_updated.csv', index=False)
-    pd.read_csv('archive/anime_updated.csv')
+    # pd.read_csv('archive/anime_updated.csv')
 
     loader = CSVLoader(file_path="archive/anime_updated.csv")
     data = loader.load()
