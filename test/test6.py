@@ -1,3 +1,4 @@
+import langchain
 from langchain import hub
 from langchain.document_loaders import WebBaseLoader
 from langchain_community.document_loaders import CSVLoader
@@ -8,6 +9,7 @@ from langchain_community.llms import Ollama
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 
+langchain.debug = True
 # Loads the latest version
 prompt = hub.pull("rlm/rag-prompt", api_url="https://api.hub.langchain.com")
 # prompt = """    You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.

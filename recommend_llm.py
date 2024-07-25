@@ -1,5 +1,6 @@
 import pandas as pd
 import tiktoken
+import langchain
 import os
 # import openai
 
@@ -15,6 +16,8 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import CSVLoader
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
+
+langchain.debug = True
 
 def item():
     a_df = pd.read_csv('archive/anime.csv', usecols=['Aired'])
@@ -58,10 +61,15 @@ def item():
     return docsearch
 
 def user(docsearch):
+    # user = pd.read_csv('archive/user.csv')
+    age, gender, genre = input("age / gender / genre: ").split()
+    age = int(age)
+
     template_prefix = """    You are a movie recommender system that help users to find anime that match their preferences. 
     Use the following pieces of database to answer the question at the end. 
     For each question, take into account the database and the personal information provided by the user.
     If you don't know the answer, just say that you don't know, don't try to make up an answer.
+    
     {context}
     """
 
@@ -76,7 +84,8 @@ def user(docsearch):
     Your response:
     """
 
-    user_info = user_info.format(age = 29, gender = 'male', genre = 'Shounen', aired = 'latest')
+    # user_info = user_info.format(age = 29, gender = 'male', genre = 'Shounen', aired = 'latest')
+    user_info = user_info.format(age = age, gender = gender, genre = genre, aired = 'latest')
 
     COMBINED_PROMPT = template_prefix +'\n'+ user_info +'\n'+ template_suffix
     print(COMBINED_PROMPT)
