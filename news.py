@@ -15,14 +15,14 @@ load_dotenv(dotenv_path)
 api_key = os.getenv("PINECONE_API_KEY")
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
-def embedding_text(path, index_name):    
+def embedding_text(path, idx, index_name):    
     loader = TextLoader(path)
     print(f"Loaded Text: {path}")
     data = loader.load()
     # print (f'You have {len(data)} document(s) in your data')
 
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    docs = text_splitter.split_documents(data)
+    # text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    # docs = text_splitter.split_documents(data)
 
     # print (f'Now you have {len(docs)} documents')
 
@@ -54,13 +54,13 @@ def embedding_text(path, index_name):
 
     vectors_to_upsert = []
     file_name = path.split('/')[-1]
-    for idx, doc in enumerate(docs):
+
+    for doc in data:
         text = doc.page_content
         vector = embeddings.encode(text).tolist()
-        # vector_dimension = len(vector)
-        # print(vector_dimension)
-        time_stamp = int(time.time())
-        doc_id = f"doc_{time_stamp}"
+        # time_stamp = int(time.time())
+        # doc_id = f"doc_{time_stamp}"
+        doc_id = f"doc_{idx}"
         metadata = {'text': text,
                     'source': file_name}
         vectors_to_upsert.append((doc_id, vector, metadata))
@@ -75,23 +75,22 @@ def retrieve(question, index_name):
     index = pc.Index(index_name)
     ollama_model = 'llama3.1:70b'
 
-    model = SentenceTransformer('jhgan/ko-sroberta-multitask')
-    query_vector = model.encode(question).tolist()
-    result = index.query(namespace="news", vector=[query_vector], top_k=9, include_metadata=True)
-    
-    for match in result['matches']:
-        print(f"ID: {match['id']}, Score: {match['score']}")
-        # print(f"ID: {match['id']}, Score: {match['score']}, Text: {match['metadata']['text']}")
-    
-    relevant_texts = []
-    for match in result['matches']:
-        relevant_texts.append(match['metadata'].get('text', 'No content available'))
-        source = match['metadata'].get('source', 'No source available')
+    ids_list = index.describe_index_stats()['namespaces']['news']['vector_count']
+    vector_ids = [f"doc_{id}"for id in range(0, ids_list)]
+    result = index.fetch(ids=vector_ids, namespace='news')
 
-        # relevant_texts.append(f"Source: {source}\n{relevant_texts}")
-        # reference = "\n\n".join(relevant_texts)
-        file = f"Source: {source}\n{relevant_texts}"
-        print(f"{file}\n")
+    for vector_id, vector_info in result['vectors'].items():
+        # print(f"ID: {vector_id}")
+        # print(f"Vector values: {vector_info['values']}")
+        if 'metadata' in vector_info:
+            # print(f"Metadata: {vector_info['metadata']}")
+            source = vector_info['metadata'].get('source', 'No source available')
+            text = vector_info['metadata'].get('text', 'No source available')
+        print()
+
+        file = f"Source: {source}\n{text}"
+        # print(f"{file}\n")
+
         template = '''
             롯데카드 is a South Korean credit card company, 로카 is short for 롯데카드, and LOCA is an acronym for Lotte Card. You are an online news management employee at 롯데카드. Your task is to find, summarize, and analyze news articles on the internet. The txt files uploaded contains the link, title, source, date, keyword and content of a news article.
             Please extract the following from files in order. Change the line for each category:
@@ -115,17 +114,18 @@ def retrieve(question, index_name):
         # response = ollama.generate(model=ollama_model, prompt=formatted_prompt, options={'temperature': 0})
         # print("LLM 답변: \n", response['response'].strip())
 
+
 if __name__ == "__main__":
     cmd = sys.argv[1:]
     if cmd[0] == 'u':
         folder = '/svc/project/genaipilot/rag/data/news/'
-        for file in os.listdir(folder):
+        for idx, file in enumerate(os.listdir(folder)):
             path = folder + file
             if os.path.isdir(path):
                 continue
             else:
                 print(path)
-                embedding_text(path, 'news')
+                embedding_text(path, idx, 'news')
     elif cmd[0] == 'r':
         question = "뉴스 기사를 찾아줘"
         retrieve(question, 'news')
