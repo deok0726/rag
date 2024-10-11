@@ -77,11 +77,14 @@ def retrieve(index_name, namespace):
 
     ids_list = index.describe_index_stats()['namespaces'][namespace]['vector_count']
     vector_ids = [f"doc_{id}"for id in range(0, ids_list)]
+    print(len(vector_ids))
     result = index.fetch(ids=vector_ids, namespace=namespace)
 
-    with open("/svc/project/genaipilot/rag/data/news/result.txt", "w") as f:
+    with open("/svc/project/genaipilot/rag/data/news/result_llama.txt", "w") as f:
+        count = 0
         for vector_id, vector_info in result['vectors'].items():
-            # print(f"ID: {vector_id}")
+            count += 1
+            print(f"ID: {vector_id}")
             # print(f"Vector values: {vector_info['values']}")
             if 'metadata' in vector_info:
                 # print(f"Metadata: {vector_info['metadata']}")
@@ -118,6 +121,79 @@ def retrieve(index_name, namespace):
             print("LLM 답변: \n", response['response'].strip())
             f.write(response['response'].strip() + "\n\n")
             f.write("-"*100 + "\n\n")
+        
+        print(count)
+
+def fact():
+    ollama_model = 'llama3.1:70b'
+    template = '''
+            tell me about today's '코스피 지수' and '코스닥 지수' only based on the extracted summary of articles below.
+            Please answer in Korean and Think step by step.
+
+            summary: {summary}
+            answer: '''
+    prompt = PromptTemplate.from_template(template)
+    formatted_prompt = prompt.format(summary=f.read())
+
+    print(formatted_prompt)
+
+    response = ollama.generate(model=ollama_model, prompt=formatted_prompt, options={'temperature': 0})
+    print("LLM 답변: \n", response['response'].strip())
+
+def insight(index_name, namespace, task):
+    pc = Pinecone(api_key=api_key)
+    index = pc.Index(index_name)
+    ollama_model = 'llama3.1:70b'
+
+    templates = [
+            '''### Summarization of content (카드사 동향)
+                Summarize the content that has '신용카드', '카드론', '카드대출', '카드페이먼트' for '키워드'. Do not include other keywords. If there are no articles with keyword stated above, do not make bullet for the keyword. Group the news articles into groups based on '키워드', using bullet points. Summarize the content of each keyword by 3~5 bullets by reading '제목', and '요약'. Include in the summary if a specific company name is mentioned but do not emphasize with parentheses. Include in the summary if numbers are mentioned. Accuracy is very important. Do not number the groups. Please answer in Korean.''',
+            '''### Financial market trends (금융시장 동향)
+                Summarize the content that has '기준금리', '원/달러' for '키워드'. Do not include other keywords. If there are no articles with keyword stated above, do not make bullet for the keyword. Group the news articles into groups based on '키워드', using bullet points. Summarize the content of each keyword by 3~5 bullets by reading '제목', and '요약'. Include in the summary if a specific company name is mentioned but do not emphasize with parentheses. Include in the summary if numbers are mentioned. Accuracy is very important. Do not number the groups. Please answer in Korean.''',
+            '''### Financial institution trends (금융기관 동향)
+                Summarize the content that has '금융감독원', '금융위원회' for '키워드'. Do not include other keywords. If there are no articles with keyword stated above, do not make bullet for the keyword. Group the news articles into groups based on '키워드', using bullet points. Summarize the content of each keyword by 3~5 bullets by reading '제목', and '요약'. Include in the summary if a specific company name is mentioned but do not emphasize with parentheses. Include in the summary if numbers are mentioned. Accuracy is very important. Do not number the groups. Please answer in Korean.''',
+            '''### Shareholders trends (주주사 동향)
+                Summarize the content that has 'MBK' for '키워드'. Do not include other keywords. If there are no articles with keyword stated above, do not make bullet for the keyword. Group the news articles into groups based on '키워드', using bullet points. Summarize the content of each keyword by 3~5 bullets by reading '제목', and '요약'. Include in the summary if a specific company name is mentioned but do not emphasize with parentheses. Include in the summary if numbers are mentioned. Accuracy is very important. Do not number the groups. Please answer in Korean.'''
+                ]
+    template = '''
+            Extract the insights from the following articles. Specify in the insight if a specific company name is mentioned. Write the category insight name in Korean only without using parentheses. Use bullets to summarize. Do not use tables. Accuracy is very important.
+            
+            Think step by step.
+            
+            theme: {theme}
+            articles: {articles}
+
+            answer: '''
+
+    questions = [
+                '''카드사 동향 관련 기사. 키워드: '신용카드', '카드론', '카드대출', '카드페이먼트' ''',
+                '''금융시장 동향 관련 기사. 키워드: '기준금리', '원/달러' ''',
+                '''금융기관 동향 관련 기사. 키워드: '금융감독원', '금융위원회' ''',
+                '''주주사 동향 관련 기사. 키워드: 'MBK' '''
+                ]
+    
+    model = SentenceTransformer('jhgan/ko-sroberta-multitask')
+    query_vector = model.encode(questions[task]).tolist()
+    result = index.query(namespace=namespace, vector=[query_vector], top_k=10, include_metadata=True)
+    relevant_texts = []
+    for match in result['matches']:
+        print(f"ID: {match['id']}, Score: {match['score']}")
+        # print(f"ID: {match['id']}, Score: {match['score']}, Text: {match['metadata']['text']}")
+
+        # relevant_texts.append(match['metadata'].get('text', 'No content available'))
+        source = match['metadata'].get('source', 'No source available')
+        texts = match['metadata'].get('text', 'No text available')
+        relevant_texts.append(f"Source: {source}\n{texts}")
+
+    reference = "\n\n".join(relevant_texts)
+
+    prompt = PromptTemplate.from_template(template)
+    formatted_prompt = prompt.format(theme=templates[task], articles=reference)
+
+    print(formatted_prompt)
+
+    response = ollama.generate(model=ollama_model, prompt=formatted_prompt, options={'temperature': 0})
+    print("LLM 답변: \n", response['response'].strip())
 
 
 if __name__ == "__main__":
@@ -134,3 +210,6 @@ if __name__ == "__main__":
                 embedding_text(path, idx, 'news', namespace)
     elif cmd[0] == 'r':
         retrieve('news', namespace)
+    elif cmd[0] == 'i':
+        task = 0
+        insight('news', namespace, task)

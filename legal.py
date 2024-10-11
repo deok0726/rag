@@ -15,6 +15,11 @@ load_dotenv(dotenv_path)
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
+def chunked_upsert(index, vectors, namespace, chunk_size=100):
+    for i in range(0, len(vectors), chunk_size):
+        chunk = vectors[i:i + chunk_size]
+        index.upsert(vectors=chunk, namespace=namespace)
+
 def embedding_text(path, index_name, namespace):    
     loader = PDFPlumberLoader(path)
     print(f"Loaded PDF: {path}")
@@ -65,7 +70,8 @@ def embedding_text(path, index_name, namespace):
                     'source': file_name}
         vectors_to_upsert.append((doc_id, vector, metadata))
 
-    index.upsert(vectors=vectors_to_upsert, namespace=namespace)
+    # index.upsert(vectors=vectors_to_upsert, namespace=namespace)
+    chunked_upsert(index, vectors_to_upsert, namespace)
 
     print(f'{index_name} upserted with documents: {file_name}')
     print(index.describe_index_stats())
@@ -166,9 +172,10 @@ def retrieve(context, question, index_name, namespace):
 def retrieve_all(context, question, index_name):
     pc = Pinecone(api_key=pinecone_api_key)
     index = pc.Index(index_name)
+    query = context + '\n' + question
 
     model = SentenceTransformer('jhgan/ko-sroberta-multitask')
-    query_vector = model.encode(question).tolist()
+    query_vector = model.encode(query).tolist()
         
     index_stats = index.describe_index_stats()
     all_namespaces = index_stats['namespaces'].keys()
@@ -208,55 +215,13 @@ def retrieve_all(context, question, index_name):
             texts = result['metadata'].get('text', 'No text available')
             relevant_texts.append(f"Namespace: {namespace}\nSource: {source}\n{texts}")
     else:
-        print("No matches with score >= 0.6 found in any namespace.")
+        print("########## No matches with score >= 0.6 found in any namespace. ##########")
 
     reference = "\n\n".join(relevant_texts)
     # print(reference)
-    few_shot_examples = '''
-    ### context: 
-    # 사실관계:
-    - 롯데카드 Datus분석팀이 광고제휴사(롯데캐피탈, 여신전문금융업자)의 대출 상품(롯데카드 고객 대상 롯데캐피탈 대출상품)에 대하여 롯데카드의 LMS(Long Message Service) 광고 채널을 통해 광고제휴사로부터 대가를 받고 중개 및 주선하고자 함.
-    - 사내 준법경영팀과 해당 유료광고 기획 건들에 대한 진행 가능 여부 및 고려사항에 대해 논의하고, 롯데카드의 사업자 신고 업종 中 '대출의 중개 및 주선업무' 항목을 근거로, 해당 유료 광고 기획 건들을 추진할 수 있는지 법무팀에게 법무검토를 받고자 함.
-    - 현재까지 타사의 대출상품에 대해 롯데카드의 LMS 광고 채널을 통해서 유료 광고를 진행한 이력은 없음.
-    - 현재까지 타사(핀다, 전자금융업종)의 대출대환서비스를 여신전문금융업종에 속한 타사(신한카드)가 LMS 광고 채널을 통해 광고를 진행한 이력은 있음.
-
-    ### reference: 
-    # 관련 법령의 전문
-    여신전문금융업법 제14조(신용카드·직불카드의 발급)
-    ④ 신용카드업자는 다음 각 호의 방법으로 신용카드회원을 모집하여서는 아니 된다.
-    「방문판매 등에 관한 법률」 제2조 제5호에 따른 다단계판매를 통한 모집
-    인터넷을 통한 모집방법으로서 대통령령으로 정하는 모집
-    그 밖에 대통령령으로 정하는 모집
-    여신전문금융업법 제14조의5(모집질서의 유지)
-    ③ 신용카드회원을 모집하는 자는 제14조 제4항 각 호의 행위 및 제24조의2(신용카드회원 모집행위와 관련된 행위에 한한다)에 따른 금지행위를 하여서는 아니 된다.
-    여신전문금융업법 시행령 제6조의7(신용카드의 발급 및 회원 모집방법 등)
-    ⑤ 법 제14조 제4항 제3호에 따라 신용카드업자는 다음 각 호의 방법으로 신용카드회원을 모집해서는 아니 된다.
-    신용카드 발급과 관련하여 그 신용카드 연회비(연회비가 주요 신용카드의 평균연회비 미만인 경우에는 해당 평균연회비를 말한다)의 100분의 10을 초과하는 경제적 이익을 제공하거나 제공할 것을 조건으로 하는 모집
-    「도로법」 제2조 및 「사도법」 제2조에 따른 도로 및 사도 등 길거리에서 하는 모집
     
-    # 관련 판례 요약
-    헌법재판소 2013. 3. 26. 선고 2013헌마110 결정
-    사건: 2013헌마110 여신전문금융업법 제14조 제4항 제3호 등 위헌확인 청구인들은 신용카드 모집인이었으며, 신용카드 모집 과정에서 연회비의 10%를 초과하는 혜택을 제공하거나 공공장소에서 모집을 진행한 행위로 과태료 처분을 받은 후 해당 조항들이 기본권을 침해한다고 주장하면서 위헌 확인을 요청하였으나, 헌법재판소는 청구인들의 헌법소원 심판 청구가 부적법하다며 각하하였다.
-
-    ### question:
-    # 질의의 요지:
-    - 롯데카드 광고채널(LMS)을 통한 '타사(롯데캐피탈)의 대출상품 중개 및 주선업무' 가능 여부
-    - 준법경영팀과 논의한 결과, 특정 고객군을 타겟팅하여 대출광고를 진행하는 경우, 단순 광고가 아닌 중개업무로 해석될 여지가 있으므로 당사의 사업자 신고업종 中 '대출상품 중개 및 주선업무' 항목을 근거로 당사에서 타사(롯데캐피탈)의 대출상품 중개 및 주선업무가 가능한지에 대해 법적으로 확인할 것을 권고함. 
-    
-    ### answer: 
-    # 질의에 대한 답변
-    1. 타사(롯데캐피탈)의 대출상품 중개 및 주선업무 가능 여부
-    해당 사례에서 롯데카드가 LMS 광고 채널을 통해 타사의 대출상품(롯데캐피탈)을 중개 및 주선하는 것이 가능한지에 대한 질의는 여신전문금융업법과 관련된 규정과 그 적용 범위에 근거하여 검토할 필요가 있습니다.
-    롯데카드는 "여신전문금융업법"상 신용카드업자로서, 신용카드 모집 및 광고 활동과 관련하여 엄격한 규제를 받고 있습니다. 특히 여신전문금융업법 제14조는 신용카드 모집 방법에 대해 제한을 두고 있으며, 신용카드 모집인 또는 신용카드업자가 대출상품을 광고하는 과정에서 법적 한계가 있을 수 있습니다. 여신전문금융업법 시행령 제6조의7에서는 신용카드 모집 시 제공할 수 있는 혜택과 모집 방법을 명시적으로 규정하고 있으며, 이러한 규정을 위반할 경우 과태료 또는 처벌을 받을 수 있습니다.
-    이와 관련된 헌법재판소 2013헌마110 결정에서도, 모집인에 대한 규제 사항들이 명확히 적용된 사례를 확인할 수 있습니다. 이 결정에서는 모집 과정에서 허용된 범위를 넘어설 경우 과태료 처분이 내려질 수 있으며, 이러한 규제가 정당하다는 결론을 내리고 있습니다.
-    따라서, 롯데카드가 타사의 대출상품을 광고하는 과정에서 LMS 광고 채널을 통해 광고를 진행하는 것은, 그 범위 내에서 단순한 광고를 넘어서는 중개 및 주선 업무로 해석될 가능성이 있습니다. 롯데카드의 사업자 신고 업종에 '대출상품 중개 및 주선업무'가 포함되어 있다 하더라도, 여신전문금융업법 및 관련 시행령의 적용을 받을 수 있으며, 법적으로 허용된 광고 방법 이외의 방식으로 대출 상품을 중개하거나 주선하는 행위는 법적 리스크가 있을 수 있습니다.
-    
-    2. 결론 및 법적 고려사항
-    결론적으로, 롯데카드가 LMS 광고 채널을 통해 타사(롯데캐피탈)의 대출상품을 중개 및 주선하는 행위는 여신전문금융업법의 규제 범위 내에서 신중하게 검토되어야 합니다. 준법경영팀의 권고대로 해당 광고가 단순 광고로 해석되지 않고 중개 업무로 해석될 여지가 있으므로, 광고 방식, 대가 수취 여부, 구체적인 중개 과정 등을 고려하여 법적 리스크가 발생할 가능성이 있습니다.
-    이에 따라, 관련 법령 및 판례를 바탕으로 중개 및 주선 행위와 단순 광고 행위의 구분이 명확하게 이뤄져야 하며, 중개로 판단될 경우 추가적인 법적 검토와 절차가 필요할 것입니다.
-    '''
     template = '''
-        You're a financial legal expert. Please answer the questions based on the laws, terms, precedents and context of question below.
+        You're a financial legal expert. Please answer the questions based on the laws, terms and precedents below.
         Use a clear tone of voice. Please answer in Korean. Think step by step.
 
         The format for your response is as follows
@@ -264,8 +229,12 @@ def retrieve_all(context, question, index_name):
         - Source and full text of the terms referenced: Specify the sections of the reference you need to refer to for your answer, and print out the full text of the reference exactly as it is. Do not summarize anything. Include everything in parentheses. Accuracy is very important. If there are multiple cases that you need to reference for your answer, please find and print them all. Find as many relevant cases as possible. If there is no reference to refer to, do not print anything.
         - Source and full text of the precedents referenced: Specify the sections of the case you need to refer to for your answer, and print out the full text of the reference exactly as it is. Do not summarize anything. Include everything in parentheses. Accuracy is very important. If there are multiple sections that you need to reference for your answer, please find and print them all. Find as many relevant sections as possible. If there is no reference to refer to, do not print anything.
 
-        context: 
-            {context}
+        Each section of question is described below.
+        - 사실관계: The facts of the case giving rise to this legal review.
+        - 질의의 요지: The answer you hope to get from this legal review.
+
+        Only use the following questions and references.
+
         question:
             {question}
         reference: 
@@ -273,7 +242,8 @@ def retrieve_all(context, question, index_name):
 
         answer: '''
     prompt = PromptTemplate.from_template(template)
-    formatted_prompt = prompt.format(reference=reference, context=context, question=question)
+    # formatted_prompt = prompt.format(reference=reference, context=context, question=question)
+    formatted_prompt = prompt.format(reference=reference, question=query)
     print(formatted_prompt)
     
     # ollama_model = 'llama3.1:70b'
